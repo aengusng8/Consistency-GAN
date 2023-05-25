@@ -188,13 +188,12 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         weights = get_weightings(self.weight_schedule, snrs, self.sigma_data)
 
         # Generator loss
-        if self.loss_norm == "l1":
-            diffs = th.abs(distiller - distiller_target)
-            generator_loss = mean_flat(diffs) * weights
-        elif self.loss_norm == "l2":
+        generator_loss = 0
+        if "l2" in self.loss_norm.keys():
             diffs = (distiller - distiller_target) ** 2
-            generator_loss = mean_flat(diffs) * weights
-        elif self.loss_norm == "l2-32":
+            generator_loss += mean_flat(diffs) * self.loss_norm["l2"]
+
+        if "l2-32" in self.loss_norm.keys():
             distiller = F.interpolate(distiller, size=32, mode="bilinear")
             distiller_target = F.interpolate(
                 distiller_target,
@@ -202,25 +201,26 @@ class CGANKarrasDenoiser(KarrasDenoiser):
                 mode="bilinear",
             )
             diffs = (distiller - distiller_target) ** 2
-            generator_loss = mean_flat(diffs) * weights
-        elif self.loss_norm == "lpips":
+            generator_loss += mean_flat(diffs) * self.loss_norm["l2-32"]
+
+        if "lpips" in self.loss_norm.keys():
             if x_start.shape[-1] < 256:
                 distiller = F.interpolate(distiller, size=224, mode="bilinear")
                 distiller_target = F.interpolate(
                     distiller_target, size=224, mode="bilinear"
                 )
 
-            generator_loss = (
+            generator_loss += (
                 self.lpips_loss(
                     (distiller + 1) / 2.0,
                     (distiller_target + 1) / 2.0,
                 )
-                * weights
+                * self.loss_norm["lpips"]
             )
-        else:
-            raise ValueError(f"Unknown generator_loss norm {self.loss_norm}")
+        
+        generator_loss *= weights
 
 
         # Discriminator loss
-        
+
         return generator_loss, discriminator_loss
