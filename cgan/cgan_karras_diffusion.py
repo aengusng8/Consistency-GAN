@@ -129,7 +129,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
             t2 = self.get_t(indices, num_scales)
             x_t2 = self.forward_ode(x_start, t2, dims, noise=noise)
 
-        return x_t1, t1, x_t2, t2
+        return x_t1, x_t2, t1, t2
 
     def consistency_generator_loss(
         self,
