@@ -47,21 +47,21 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         t1,
         t2,
         x_start,
-        teacher_model,
+        teacher_netG,
         teacher_denoise_fn,
         dims,
     ):
         @th.no_grad()
         def heun_solver(samples, t, next_t, x0):
             x = samples
-            if teacher_model is None:
+            if teacher_netG is None:
                 denoiser = x0
             else:
                 denoiser = teacher_denoise_fn(x, t)
 
             d = (x - denoiser) / append_dims(t, dims)
             samples = x + d * append_dims(next_t - t, dims)
-            if teacher_model is None:
+            if teacher_netG is None:
                 denoiser = x0
             else:
                 denoiser = teacher_denoise_fn(samples, next_t)
@@ -74,7 +74,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         @th.no_grad()
         def euler_solver(samples, t, next_t, x0):
             x = samples
-            if teacher_model is None:
+            if teacher_netG is None:
                 denoiser = x0
             else:
                 denoiser = teacher_denoise_fn(x, t)
@@ -83,7 +83,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
 
             return samples
 
-        ode_solver = euler_solver if teacher_model is None else heun_solver
+        ode_solver = euler_solver if teacher_netG is None else heun_solver
         x_t2 = ode_solver(x_t1, t1, t2, x_start).detach()
 
         return x_t2
@@ -94,7 +94,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         num_scales,
         dims,
         noise,
-        teacher_model,
+        teacher_netG,
         teacher_denoise_fn,
     ):
         indices = th.randint(
@@ -114,7 +114,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
                     t1,
                     t2,
                     x_start,
-                    teacher_model,
+                    teacher_netG,
                     teacher_denoise_fn,
                     dims,
                 )
@@ -131,49 +131,48 @@ class CGANKarrasDenoiser(KarrasDenoiser):
 
         return x_t1, t1, x_t2, t2
 
-    def consistency_gan_losses(
+    def consistency_generator_loss(
         self,
         model,
         x_start,
         num_scales,
-        model_kwargs=None,
-        target_model=None,
-        teacher_model=None,
-        discriminator_model=None,
+        netG_kwargs=None,
+        target_netG=None,
+        teacher_netG=None,
         teacher_diffusion=None,
         noise=None,
     ):
-        if model_kwargs is None:
-            model_kwargs = {}
+        if netG_kwargs is None:
+            netG_kwargs = {}
         if noise is None:
             noise = th.randn_like(x_start)
 
         dims = x_start.ndim
 
         def denoise_fn(x, t):
-            return self.denoise(model, x, t, **model_kwargs)[1]
+            return self.denoise(model, x, t, **netG_kwargs)[1]
 
-        if target_model:
+        if target_netG:
 
             @th.no_grad()
             def target_denoise_fn(x, t):
-                return self.denoise(target_model, x, t, **model_kwargs)[1]
+                return self.denoise(target_netG, x, t, **netG_kwargs)[1]
 
         else:
             raise NotImplementedError("Must have a target model")
 
-        if teacher_model:
+        if teacher_netG:
 
             @th.no_grad()
             def teacher_denoise_fn(x, t):
-                return teacher_diffusion.denoise(teacher_model, x, t, **model_kwargs)[1]
+                return teacher_diffusion.denoise(teacher_netG, x, t, **netG_kwargs)[1]
 
         x_t1, x_t2, t1, t2 = self.get_two_points_on_same_trajectory(
             x_start,
             num_scales,
             dims,
             noise,
-            teacher_model,
+            teacher_netG,
             teacher_denoise_fn,
         )
 
@@ -188,10 +187,10 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         weights = get_weightings(self.weight_schedule, snrs, self.sigma_data)
 
         # Generator loss
-        generator_loss = 0
+        netG_loss = 0
         if "l2" in self.loss_norm.keys():
             diffs = (distiller - distiller_target) ** 2
-            generator_loss += mean_flat(diffs) * self.loss_norm["l2"]
+            netG_loss += mean_flat(diffs) * self.loss_norm["l2"]
 
         if "l2-32" in self.loss_norm.keys():
             distiller = F.interpolate(distiller, size=32, mode="bilinear")
@@ -201,7 +200,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
                 mode="bilinear",
             )
             diffs = (distiller - distiller_target) ** 2
-            generator_loss += mean_flat(diffs) * self.loss_norm["l2-32"]
+            netG_loss += mean_flat(diffs) * self.loss_norm["l2-32"]
 
         if "lpips" in self.loss_norm.keys():
             if x_start.shape[-1] < 256:
@@ -210,17 +209,24 @@ class CGANKarrasDenoiser(KarrasDenoiser):
                     distiller_target, size=224, mode="bilinear"
                 )
 
-            generator_loss += (
+            netG_loss += (
                 self.lpips_loss(
                     (distiller + 1) / 2.0,
                     (distiller_target + 1) / 2.0,
                 )
                 * self.loss_norm["lpips"]
             )
-        
-        generator_loss *= weights
 
+        netG_loss *= weights
+    
+        return netG_loss # Consistency Generator Loss
+    
+    def adversarial_generator_loss(
+        self,
+    ):
+        pass
 
-        # Discriminator loss
-
-        return generator_loss, discriminator_loss
+    def adversarial_discriminator_loss(
+        self,
+    ):
+        pass
