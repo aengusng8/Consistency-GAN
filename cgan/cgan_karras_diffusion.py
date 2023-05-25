@@ -32,10 +32,12 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         x_t = x_start + noise * append_dims(t, dims)
         return x_t
 
-    def get_t(self, indices, num_scales):
+    def get_t(self, indices, num_scales, sigma_min=None):
+        if sigma_min is None:
+            sigma_min = self.sigma_min
         # BUG (maybe): indices - 1
         t = self.sigma_max ** (1 / self.rho) + indices / (num_scales - 1) * (
-            self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho)
+            sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho)
         )
         t = t**self.rho
 
@@ -96,6 +98,8 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         noise,
         teacher_netG,
         teacher_denoise_fn,
+        use_adjacent_points,
+        use_ode_solver,
     ):
         indices = th.randint(
             0, num_scales - 1, (x_start.shape[0],), device=x_start.device
@@ -104,10 +108,10 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         t1 = self.get_t(indices, num_scales)
         x_t1 = self.forward_ode(x_start, t1, dims, noise=noise)
 
-        if self.use_adjacent_points:
+        if use_adjacent_points:
             t2 = self.get_t(indices + 1, num_scales)
 
-            if self.use_ode_solver:
+            if use_ode_solver:
                 x_t2 = self.ode_solve_adjacent_point(
                     self,
                     x_t1,
@@ -133,7 +137,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
 
     def consistency_generator_loss(
         self,
-        model,
+        netG,
         x_start,
         num_scales,
         netG_kwargs=None,
@@ -150,7 +154,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         dims = x_start.ndim
 
         def denoise_fn(x, t):
-            return self.denoise(model, x, t, **netG_kwargs)[1]
+            return self.denoise(netG, x, t, **netG_kwargs)[1]
 
         if target_netG:
 
@@ -159,7 +163,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
                 return self.denoise(target_netG, x, t, **netG_kwargs)[1]
 
         else:
-            raise NotImplementedError("Must have a target model")
+            raise NotImplementedError("Must have a target netG")
 
         if teacher_netG:
 
@@ -174,6 +178,8 @@ class CGANKarrasDenoiser(KarrasDenoiser):
             noise,
             teacher_netG,
             teacher_denoise_fn,
+            use_adjacent_points=self.use_adjacent_points,
+            use_ode_solver=self.use_ode_solver,
         )
 
         dropout_state = th.get_rng_state()
@@ -218,15 +224,118 @@ class CGANKarrasDenoiser(KarrasDenoiser):
             )
 
         netG_loss *= weights
-    
-        return netG_loss # Consistency Generator Loss
-    
+
+        return netG_loss  # Consistency Generator Loss
+
     def adversarial_generator_loss(
         self,
+        netD,
+        netG,
+        netG_kwargs,
+        x_start,
+        num_scales,
+        dims,
     ):
-        pass
+        def denoise_fn(x, t):
+            return self.denoise(netG, x, t, **netG_kwargs)[1]
+
+        indices = th.randint(
+            0, num_scales - 1, (x_start.shape[0],), device=x_start.device
+        )
+        t1 = self.get_t(indices, num_scales)
+        x_t1 = self.forward_ode(x_start, t1, dims, noise=noise)
+
+        distiller = denoise_fn(x_t2, t2)
+
+        noise = th.randn_like(x_start)
+        t2 = self.get_t(self, indices + 1, num_scales, sigma_min=0)
+        x_t2 = distiller + noise * append_dims(t2, dims)
+
+        output = netD(x_t2, t1, x_t1.detach()).view(-1)
+        errG = F.softplus(-output)
+        errG = errG.mean()
+
+        return errG # Adversarial Generator Loss
 
     def adversarial_discriminator_loss(
         self,
+        netD,
+        netG,
+        netG_kwargs,
+        x_start,
+        num_scales,
+        dims,
+        lazy_reg,
+        r1_gamma,
+        global_step,
+        distiller=None,
     ):
-        pass
+        # FIXME: What if denoise_fn instead of target_denoise_fn?
+        def denoise_fn(x, t):
+            return self.denoise(netG, x, t, **netG_kwargs)[1]
+
+        # Train with real
+        x_t1, x_t2, t1, t2 = self.get_two_points_on_same_trajectory(
+            x_start,
+            num_scales,
+            dims,
+            noise,
+            use_adjacent_points=False,
+            use_ode_solver=False,
+        )
+
+        # BUG: check shape of x_pos, t1, x_t1
+        D_real = netD(x_t2, t1, x_t1.detach()).view(-1)
+
+        errD_real = F.softplus(-D_real)
+        errD_real = errD_real.mean()
+        errD_real.backward(retain_graph=True)
+
+        # encourages the discriminator to stay smooth and improves the convergence of GAN training
+        if lazy_reg is None:
+            grad_real = th.autograd.grad(
+                outputs=D_real.sum(), inputs=x_t1, create_graph=True
+            )[0]
+            grad_penalty = (
+                grad_real.view(grad_real.size(0), -1).norm(2, dim=1) ** 2
+            ).mean()
+
+            grad_penalty = r1_gamma / 2 * grad_penalty
+            grad_penalty.backward()
+        else:
+            if global_step % lazy_reg == 0:
+                grad_real = th.autograd.grad(
+                    outputs=D_real.sum(), inputs=x_t1, create_graph=True
+                )[0]
+                grad_penalty = (
+                    grad_real.view(grad_real.size(0), -1).norm(2, dim=1) ** 2
+                ).mean()
+
+                grad_penalty = r1_gamma / 2 * grad_penalty
+                grad_penalty.backward()
+
+        # Train with fake
+        # FIXME: pass 'distiller' to avoid recomputing and complexity
+        if distiller is None:
+            indices = th.randint(
+                0, num_scales - 1, (x_start.shape[0],), device=x_start.device
+            )
+            t1 = self.get_t(indices, num_scales)
+            x_t1 = self.forward_ode(x_start, t1, dims, noise=noise)
+
+            distiller = denoise_fn(x_t1, t1)
+
+        noise = th.randn_like(x_start)
+
+        # NOTE: x_t2 should clean if indices + 1 == 0, which means t2 == 0
+        # BUG: check sigma_min=0 code
+        t2 = self.get_t(self, indices + 1, num_scales, sigma_min=0)
+        x_t2 = distiller + noise * append_dims(t2, dims)
+
+        D_fake = netD(x_t2, t1, x_t1.detach()).view(-1)
+
+        errD_fake = F.softplus(D_fake)
+        errD_fake = errD_fake.mean()
+        errD_fake.backward()
+
+        return errD_real, grad_penalty, errD_fake
