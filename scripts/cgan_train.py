@@ -1,5 +1,5 @@
 """
-Train a diffusion model on images.
+Train a diffusion netG on images.
 """
 
 import argparse
@@ -8,14 +8,13 @@ from cm import dist_util, logger
 from cm.image_datasets import load_data
 from cm.resample import create_named_schedule_sampler
 from cm.script_util import (
-    model_and_diffusion_defaults,
-    create_model_and_diffusion,
-    cm_train_defaults,
+    model_and_diffusion_defaults as netG_and_diffusion_defaults,
+    create_model_and_diffusion as create_netG_and_diffusion,
     args_to_dict,
     add_dict_to_argparser,
     create_ema_and_scales_fn,
 )
-from cm.train_util import CMTrainLoop
+from cgan.cgan_train_util import ConsistencyGANTrainLoop
 import torch.distributed as dist
 import copy
 
@@ -26,7 +25,7 @@ def main():
     dist_util.setup_dist()
     logger.configure()
 
-    logger.log("creating model and diffusion...")
+    logger.log("creating netG and diffusion...")
     ema_scale_fn = create_ema_and_scales_fn(
         target_ema_mode=args.target_ema_mode,
         start_ema=args.start_ema,
@@ -43,15 +42,13 @@ def main():
     else:
         raise ValueError(f"unknown training mode {args.training_mode}")
 
-    model_and_diffusion_kwargs = args_to_dict(
-        args, model_and_diffusion_defaults().keys()
-    )
-    model_and_diffusion_kwargs["distillation"] = distillation
-    model, diffusion = create_model_and_diffusion(**model_and_diffusion_kwargs)
-    model.to(dist_util.dev())
-    model.train()
+    netG_and_diffusion_kwargs = args_to_dict(args, netG_and_diffusion_defaults().keys())
+    netG_and_diffusion_kwargs["distillation"] = distillation
+    netG, diffusion = create_netG_and_diffusion(**netG_and_diffusion_kwargs)
+    netG.to(dist_util.dev())
+    netG.train()
     if args.use_fp16:
-        model.convert_to_fp16()
+        netG.convert_to_fp16()
 
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
 
@@ -72,56 +69,56 @@ def main():
         class_cond=args.class_cond,
     )
 
-    if len(args.teacher_model_path) > 0:  # path to the teacher score model.
-        logger.log(f"loading the teacher model from {args.teacher_model_path}")
-        teacher_model_and_diffusion_kwargs = copy.deepcopy(model_and_diffusion_kwargs)
+    if len(args.teacher_model_path) > 0:  # path to the teacher score netG.
+        logger.log(f"loading the teacher netG from {args.teacher_model_path}")
+        teacher_model_and_diffusion_kwargs = copy.deepcopy(netG_and_diffusion_kwargs)
         teacher_model_and_diffusion_kwargs["dropout"] = args.teacher_dropout
         teacher_model_and_diffusion_kwargs["distillation"] = False
-        teacher_model, teacher_diffusion = create_model_and_diffusion(
+        teacher_netG, teacher_diffusion = create_netG_and_diffusion(
             **teacher_model_and_diffusion_kwargs,
         )
 
-        teacher_model.load_state_dict(
+        teacher_netG.load_state_dict(
             dist_util.load_state_dict(args.teacher_model_path, map_location="cpu"),
         )
 
-        teacher_model.to(dist_util.dev())
-        teacher_model.eval()
+        teacher_netG.to(dist_util.dev())
+        teacher_netG.eval()
 
-        for dst, src in zip(model.parameters(), teacher_model.parameters()):
+        for dst, src in zip(netG.parameters(), teacher_netG.parameters()):
             dst.data.copy_(src.data)
 
         if args.use_fp16:
-            teacher_model.convert_to_fp16()
+            teacher_netG.convert_to_fp16()
 
     else:
-        teacher_model = None
+        teacher_netG = None
         teacher_diffusion = None
 
-    # load the target model for distillation, if path specified.
+    # load the target netG for distillation, if path specified.
 
-    logger.log("creating the target model")
-    target_model, _ = create_model_and_diffusion(
-        **model_and_diffusion_kwargs,
+    logger.log("creating the target netG")
+    target_netG, _ = create_netG_and_diffusion(
+        **netG_and_diffusion_kwargs,
     )
 
-    target_model.to(dist_util.dev())
-    target_model.train()
+    target_netG.to(dist_util.dev())
+    target_netG.train()
 
-    dist_util.sync_params(target_model.parameters())
-    dist_util.sync_params(target_model.buffers())
+    dist_util.sync_params(target_netG.parameters())
+    dist_util.sync_params(target_netG.buffers())
 
-    for dst, src in zip(target_model.parameters(), model.parameters()):
+    for dst, src in zip(target_netG.parameters(), netG.parameters()):
         dst.data.copy_(src.data)
 
     if args.use_fp16:
-        target_model.convert_to_fp16()
+        target_netG.convert_to_fp16()
 
     logger.log("training...")
-    CMTrainLoop(
-        model=model,
-        target_model=target_model,
-        teacher_model=teacher_model,
+    ConsistencyGANTrainLoop(
+        model=netG,
+        target_netG=target_netG,
+        teacher_netG=teacher_netG,
         teacher_diffusion=teacher_diffusion,
         training_mode=args.training_mode,
         ema_scale_fn=ema_scale_fn,
@@ -143,6 +140,26 @@ def main():
     ).run_loop()
 
 
+def cgan_train_defaults():
+    loss_norm = {
+        "lpips": 1,
+    }
+
+    return dict(
+        teacher_model_path="",
+        teacher_dropout=0.1,
+        training_mode="consistency_gan_training",
+        target_ema_mode="fixed",
+        scale_mode="fixed",
+        total_training_steps=600000,
+        start_ema=0.0,
+        start_scales=40,
+        end_scales=40,
+        distill_steps_per_iter=50000,
+        loss_norm=loss_norm,
+    )
+
+
 def create_argparser():
     defaults = dict(
         data_dir="",
@@ -160,8 +177,8 @@ def create_argparser():
         use_fp16=False,
         fp16_scale_growth=1e-3,
     )
-    defaults.update(model_and_diffusion_defaults())
-    defaults.update(cm_train_defaults())
+    defaults.update(netG_and_diffusion_defaults())
+    defaults.update(cgan_train_defaults())
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
     return parser
