@@ -6,11 +6,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from piq import LPIPS
 from torchvision.transforms import RandomCrop
-from . import dist_util
+from cm import dist_util
 
-from ..cm.nn import mean_flat, append_dims, append_zero
-from ..cm.random_util import get_generator
-from ..cm.karras_diffusion import KarrasDenoiser, get_weightings
+from cm.nn import mean_flat, append_dims, append_zero
+from cm.random_util import get_generator
+from cm.karras_diffusion import KarrasDenoiser, get_weightings
 
 
 class CGANKarrasDenoiser(KarrasDenoiser):

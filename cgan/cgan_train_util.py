@@ -8,18 +8,18 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import RAdam
 
-from ..cm import dist_util, logger
-from ..cm.fp16_util import MixedPrecisionTrainer
-from ..cm.nn import update_ema
-from ..cm.resample import LossAwareSampler, UniformSampler
-from ..cm.train_util import (
+from cm import dist_util, logger
+from cm.fp16_util import MixedPrecisionTrainer
+from cm.nn import update_ema
+from cm.resample import LossAwareSampler, UniformSampler
+from cm.train_util import (
     TrainLoop,
     find_resume_checkpoint,
     log_loss_dict,
     get_blob_logdir,
 )
 
-from ..cm.fp16_util import (
+from cm.fp16_util import (
     get_param_groups_and_shapes,
     make_master_params,
     master_params_to_model_params,
