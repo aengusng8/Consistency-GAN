@@ -11,9 +11,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from ..cm import up_or_down_sampling
-from ..cm import dense_layer
-from ..cm import layers
+from . import up_or_down_sampling
+from . import dense_layer
+from . import layers
 
 dense = dense_layer.dense
 conv2d = dense_layer.conv2d
