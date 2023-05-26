@@ -4,6 +4,7 @@ Train a diffusion netG on images.
 
 import argparse
 
+
 from cm import dist_util, logger
 from cm.image_datasets import load_data
 from cm.resample import create_named_schedule_sampler
@@ -15,7 +16,11 @@ from cm.script_util import (
     create_ema_and_scales_fn,
 )
 from cgan.cgan_train_util import ConsistencyGANTrainLoop
+from cgan.cgan_karras_diffusion import CGANKarrasDenoiser
+from cgan.discriminator import Discriminator_small, Discriminator_large
 import torch.distributed as dist
+import torch.nn as nn
+
 import copy
 
 
@@ -35,16 +40,35 @@ def main():
         total_steps=args.total_training_steps,
         distill_steps_per_iter=args.distill_steps_per_iter,
     )
-    if args.training_mode == "progdist":
-        distillation = False
-    elif "consistency" in args.training_mode:
-        distillation = True
-    else:
-        raise ValueError(f"unknown training mode {args.training_mode}")
+
+    Discriminator = (
+        Discriminator_small
+        if args.dataset
+        in ["cifar10", "stackmnist", "tiny_imagenet_200", "stl10", "imagenet-64"]
+        else Discriminator_large
+    )
+    netD = Discriminator(
+        nc=2 * args.netD_num_channels,
+        ngf=args.netD_ngf,
+        t_emb_dim=args.netD_t_emb_dim,
+        act=nn.LeakyReLU(0.2),
+        patch_size=args.netD_patch_size,
+        use_local_loss=args.netD_use_local_loss,
+    ).to(dist_util.dev())
 
     netG_and_diffusion_kwargs = args_to_dict(args, netG_and_diffusion_defaults().keys())
-    netG_and_diffusion_kwargs["distillation"] = distillation
-    netG, diffusion = create_netG_and_diffusion(**netG_and_diffusion_kwargs)
+    netG_and_diffusion_kwargs["distillation"] = True
+    netG, _ = create_netG_and_diffusion(**netG_and_diffusion_kwargs)
+
+    if "distillation" in args.training_mode:
+        args.use_adjacent_points = True
+        args.use_ode_solver = True
+    diffusion = CGANKarrasDenoiser(
+        **netG_and_diffusion_kwargs,
+        use_adjacent_points=args.use_adjacent_points,
+        use_ode_solver=args.use_ode_solver,
+    )
+
     netG.to(dist_util.dev())
     netG.train()
     if args.use_fp16:
@@ -116,6 +140,7 @@ def main():
 
     logger.log("training...")
     ConsistencyGANTrainLoop(
+        netD=netD,
         model=netG,
         target_netG=target_netG,
         teacher_netG=teacher_netG,
@@ -137,18 +162,16 @@ def main():
         schedule_sampler=schedule_sampler,
         weight_decay=args.weight_decay,
         lr_anneal_steps=args.lr_anneal_steps,
+        lazy_reg=args.lazy_reg,
+        r1_gamma=args.r1_gamma,
     ).run_loop()
 
 
 def cgan_train_defaults():
-    loss_norm = {
-        "lpips": 1,
-    }
-
     return dict(
         teacher_model_path="",
         teacher_dropout=0.1,
-        training_mode="consistency_gan_training",
+        training_mode="consistency_gan_distillation",
         target_ema_mode="fixed",
         scale_mode="fixed",
         total_training_steps=600000,
@@ -156,7 +179,24 @@ def cgan_train_defaults():
         start_scales=40,
         end_scales=40,
         distill_steps_per_iter=50000,
-        loss_norm=loss_norm,
+        loss_norm={
+            "lpips": 1,
+        },
+        use_adjacent_points=True,
+        use_ode_solver=True,
+    )
+
+
+def netD_defaults():
+    return dict(
+        data="imagenet-64",
+        netD_num_channels=3,
+        netD_ngf=64,
+        netD_t_emb_dim=256,
+        netD_patch_size=1,
+        netD_use_local_loss=False,
+        lazy_reg=15,
+        r1_gamma=0.02,
     )
 
 
@@ -177,6 +217,7 @@ def create_argparser():
         use_fp16=False,
         fp16_scale_growth=1e-3,
     )
+    defaults.update(netD_defaults())
     defaults.update(netG_and_diffusion_defaults())
     defaults.update(cgan_train_defaults())
     parser = argparse.ArgumentParser()
