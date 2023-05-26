@@ -38,6 +38,8 @@ class ConsistencyGANTrainLoop(TrainLoop):
         training_mode,
         ema_scale_fn,
         total_training_steps,
+        lazy_reg,
+        r1_gamma,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -49,6 +51,8 @@ class ConsistencyGANTrainLoop(TrainLoop):
         self.teacher_netG = teacher_netG
         self.teacher_diffusion = teacher_diffusion
         self.total_training_steps = total_training_steps
+        self.lazy_reg = lazy_reg
+        self.r1_gamma = r1_gamma
 
         if target_netG:
             self._load_and_sync_target_parameters()
