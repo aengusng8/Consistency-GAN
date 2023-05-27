@@ -1,4 +1,4 @@
-# bash run_cm.sh imagenet_64 train
+# bash run_cgan.sh imagenet_64 train
 
 CURDIR=$(
     cd $(dirname $0)
@@ -24,7 +24,7 @@ if [[ $MODE == train ]]; then
     echo "==> Training Consistency GAN"
 
     if [[ $DATASET == imagenet_64 ]]; then
-        python -m scripts.cm_train \
+        python -m scripts.cgan_train \
             --training_mode consistency_gan_training \
             --target_ema_mode adaptive \
             --start_ema 0.95 --scale_mode progressive \
