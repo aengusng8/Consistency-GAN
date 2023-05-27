@@ -14,8 +14,8 @@ from cm.karras_diffusion import KarrasDenoiser, get_weightings
 
 
 class CGANKarrasDenoiser(KarrasDenoiser):
-    def __init__(self, use_adjacent_points=False, use_ode_solver=False):
-        super().__init__()
+    def __init__(self, use_adjacent_points=False, use_ode_solver=False, **kwargs):
+        super().__init__(**kwargs)
         self.use_adjacent_points = use_adjacent_points
         self.use_ode_solver = use_ode_solver
 
