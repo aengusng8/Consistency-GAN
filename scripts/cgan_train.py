@@ -11,6 +11,7 @@ from cm.resample import create_named_schedule_sampler
 from cm.script_util import (
     model_and_diffusion_defaults as netG_and_diffusion_defaults,
     create_model_and_diffusion as create_netG_and_diffusion,
+    create_model as create_netG,
     args_to_dict,
     add_dict_to_argparser,
     create_ema_and_scales_fn,
@@ -41,6 +42,8 @@ def main():
         distill_steps_per_iter=args.distill_steps_per_iter,
     )
 
+    # Discriminator
+    logger.log("creating the netD...")
     Discriminator = (
         Discriminator_small
         if args.dataset
@@ -52,30 +55,28 @@ def main():
         ngf=args.netD_ngf,
         t_emb_dim=args.netD_t_emb_dim,
         act=nn.LeakyReLU(0.2),
-        patch_size=args.netD_patch_size,
-        use_local_loss=args.netD_use_local_loss,
     ).to(dist_util.dev())
 
-    netG_and_diffusion_kwargs = args_to_dict(args, netG_and_diffusion_defaults().keys())
-    netG_and_diffusion_kwargs["distillation"] = True
-    netG, _ = create_netG_and_diffusion(**netG_and_diffusion_kwargs)
-
-    if "distillation" in args.training_mode:
-        args.use_adjacent_points = True
-        args.use_ode_solver = True
-    diffusion = CGANKarrasDenoiser(
-        **netG_and_diffusion_kwargs,
-        use_adjacent_points=args.use_adjacent_points,
-        use_ode_solver=args.use_ode_solver,
-    )
-
+    # Generator
+    logger.log("creating the netG...")
+    netG_kwargs = args_to_dict(args, netG_defaults().keys())
+    netG = create_netG(**netG_kwargs)
     netG.to(dist_util.dev())
     netG.train()
     if args.use_fp16:
         netG.convert_to_fp16()
 
+    # Karras Diffusion
+    cgan_diffusion_kwargs = args_to_dict(args, cgan_diffusion_defaults().keys())
+    if "distillation" in args.training_mode:
+        cgan_diffusion_kwargs.use_adjacent_points = True
+        cgan_diffusion_kwargs.use_ode_solver = True
+    diffusion = CGANKarrasDenoiser(
+        **cgan_diffusion_kwargs,
+    )
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
 
+    # Data Loader
     logger.log("creating data loader...")
     if args.batch_size == -1:
         batch_size = args.global_batch_size // dist.get_world_size()
@@ -93,9 +94,12 @@ def main():
         class_cond=args.class_cond,
     )
 
+    # Teacher model
     if len(args.teacher_model_path) > 0:  # path to the teacher score netG.
-        logger.log(f"loading the teacher netG from {args.teacher_model_path}")
-        teacher_model_and_diffusion_kwargs = copy.deepcopy(netG_and_diffusion_kwargs)
+        logger.log(f"loading the teacher netG from {args.teacher_model_path}...")
+
+        teacher_model_and_diffusion_kwargs = copy.deepcopy(netG_kwargs)
+        teacher_model_and_diffusion_kwargs.update(diffusion_defaults())
         teacher_model_and_diffusion_kwargs["dropout"] = args.teacher_dropout
         teacher_model_and_diffusion_kwargs["distillation"] = False
         teacher_netG, teacher_diffusion = create_netG_and_diffusion(
@@ -120,12 +124,10 @@ def main():
         teacher_diffusion = None
 
     # load the target netG for distillation, if path specified.
-
     logger.log("creating the target netG")
-    target_netG, _ = create_netG_and_diffusion(
-        **netG_and_diffusion_kwargs,
+    target_netG = create_netG(
+        **netG_kwargs,
     )
-
     target_netG.to(dist_util.dev())
     target_netG.train()
 
@@ -189,7 +191,7 @@ def cgan_train_defaults():
 
 def netD_defaults():
     return dict(
-        data="imagenet-64",
+        dataset="imagenet-64",
         netD_num_channels=3,
         netD_ngf=64,
         netD_t_emb_dim=256,
@@ -198,6 +200,48 @@ def netD_defaults():
         lazy_reg=15,
         r1_gamma=0.02,
     )
+
+
+def netG_defaults():
+    return dict(
+        image_size=64,
+        num_channels=128,
+        num_res_blocks=2,
+        num_heads=4,
+        num_heads_upsample=-1,
+        num_head_channels=-1,
+        attention_resolutions="32,16,8",
+        channel_mult="",
+        dropout=0.0,
+        class_cond=False,
+        use_checkpoint=False,
+        use_scale_shift_norm=True,
+        resblock_updown=False,
+        use_fp16=False,
+        use_new_attention_order=False,
+        learn_sigma=False,
+    )
+
+
+def diffusion_defaults():
+    return dict(
+        sigma_data=0.5,
+        sigma_max=80.0,
+        sigma_min=0.002,
+        distillation=True,
+        weight_schedule="karras",
+    )
+
+
+def cgan_diffusion_defaults():
+    diffusion_kwargs = diffusion_defaults()
+    diffusion_kwargs.update(
+        dict(
+            use_adjacent_points=False,
+            use_ode_solver=False,
+        )
+    )
+    return diffusion_kwargs
 
 
 def create_argparser():
@@ -218,7 +262,8 @@ def create_argparser():
         fp16_scale_growth=1e-3,
     )
     defaults.update(netD_defaults())
-    defaults.update(netG_and_diffusion_defaults())
+    defaults.update(netG_defaults())
+    defaults.update(cgan_diffusion_defaults())
     defaults.update(cgan_train_defaults())
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
