@@ -59,11 +59,11 @@ class ConsistencyGANTrainLoop(TrainLoop):
             self.target_netG.requires_grad_(False)
             self.target_netG.train()
 
-            self.target_model_param_groups_and_shapes = get_param_groups_and_shapes(
+            self.target_netG_param_groups_and_shapes = get_param_groups_and_shapes(
                 self.target_netG.named_parameters()
             )
-            self.target_model_master_params = make_master_params(
-                self.target_model_param_groups_and_shapes
+            self.target_netG_master_params = make_master_params(
+                self.target_netG_param_groups_and_shapes
             )
 
         if teacher_netG:
@@ -196,13 +196,13 @@ class ConsistencyGANTrainLoop(TrainLoop):
         target_ema, scales = self.ema_scale_fn(self.global_step)
         with th.no_grad():
             update_ema(
-                self.target_model_master_params,
+                self.target_netG_master_params,
                 self.mp_trainerG.master_params,
                 rate=target_ema,
             )
             master_params_to_model_params(
-                self.target_model_param_groups_and_shapes,
-                self.target_model_master_params,
+                self.target_netG_param_groups_and_shapes,
+                self.target_netG_master_params,
             )
 
     def run_step(self, batch, cond):
@@ -266,10 +266,9 @@ class ConsistencyGANTrainLoop(TrainLoop):
                 global_step=self.global_step,
                 distiller=None,
             )
-
-            errD_real *= weights
-            errD_fake *= weights
-            grad_penalty *= weights
+            # errD_real *= weights
+            # errD_fake *= weights
+            # grad_penalty *= weights
             losses["Adversarial Discriminator Loss"] = (errD_real + errD_fake).item()
 
             # 2.2 Update D's parameters
@@ -304,7 +303,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
                         dims=micro.ndim,
                     )
 
-            adver_netG_loss *= weights
+            # adver_netG_loss *= weights
             losses["Adversarial Generator Loss"] = adver_netG_loss.item()
             # 3.2 Update G's parameters
             self.mp_trainerG.zero_grad()
@@ -320,7 +319,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
 
             if took_step:
                 self._update_ema()
-                if self.target_model:
+                if self.target_netG:
                     self._update_target_ema()
                 self.step += 1
                 self.global_step += 1

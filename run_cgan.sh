@@ -30,7 +30,6 @@ if [[ $MODE == train ]]; then
             --start_ema 0.95 --scale_mode progressive \
             --start_scales 2 --end_scales 200 \
             --total_training_steps 800000 \
-            --loss_norm lpips \
             --lr_anneal_steps 0 \
             --attention_resolutions 32,16,8 \
             --class_cond True \
@@ -44,6 +43,8 @@ if [[ $MODE == train ]]; then
             --schedule_sampler uniform \
             --use_fp16 False \
             --weight_decay 0.0 --weight_schedule uniform \
+            --use_adjacent_points False \
+            --use_ode_solver False \
             --data_dir $DATASET_DIR
 
     fi

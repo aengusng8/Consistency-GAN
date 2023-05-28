@@ -3,6 +3,8 @@ Train a diffusion netG on images.
 """
 
 import argparse
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning) 
 
 
 from cm import dist_util, logger
@@ -146,11 +148,11 @@ def main():
         model=netG,
         target_netG=target_netG,
         teacher_netG=teacher_netG,
+        diffusion=diffusion,
         teacher_diffusion=teacher_diffusion,
         training_mode=args.training_mode,
         ema_scale_fn=ema_scale_fn,
         total_training_steps=args.total_training_steps,
-        diffusion=diffusion,
         data=data,
         batch_size=batch_size,
         microbatch=args.microbatch,
@@ -181,9 +183,6 @@ def cgan_train_defaults():
         start_scales=40,
         end_scales=40,
         distill_steps_per_iter=50000,
-        loss_norm={
-            "lpips": 1,
-        },
         use_adjacent_points=True,
         use_ode_solver=True,
     )
@@ -239,6 +238,7 @@ def cgan_diffusion_defaults():
         dict(
             use_adjacent_points=False,
             use_ode_solver=False,
+            loss_norm=dict(lpips=1),
         )
     )
     return diffusion_kwargs

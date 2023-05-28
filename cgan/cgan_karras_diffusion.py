@@ -18,6 +18,8 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         super().__init__(**kwargs)
         self.use_adjacent_points = use_adjacent_points
         self.use_ode_solver = use_ode_solver
+        if "lpips" in self.loss_norm:
+            self.lpips_loss = LPIPS(replace_pooling=True, reduction="none")
 
     def forward_ode(
         self,
@@ -95,12 +97,15 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         x_start,
         num_scales,
         dims,
-        noise,
-        teacher_netG,
-        teacher_denoise_fn,
         use_adjacent_points,
         use_ode_solver,
+        noise=None,
+        teacher_netG=None,
+        teacher_denoise_fn=None,
     ):
+        if noise is None:
+            noise = th.randn_like(x_start)
+
         discrete_t1 = th.randint(
             0, num_scales - 1, (x_start.shape[0],), device=x_start.device
         )
@@ -113,8 +118,11 @@ class CGANKarrasDenoiser(KarrasDenoiser):
             continuous_t2 = self.get_continuous_t(discrete_t2, num_scales)
 
             if use_ode_solver:
+                assert (
+                    teacher_netG is not None
+                ), "teacher_netG must be provided if using ODE solver"
+
                 x_t2 = self.ode_solve_adjacent_point(
-                    self,
                     x_t1,
                     continuous_t1,
                     continuous_t2,
@@ -127,9 +135,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
                 x_t2 = self.forward_ode(x_start, continuous_t2, dims, noise=noise)
 
         else:
-            diff = th.randint(
-                1, num_scales - 1, (x_start.shape[0],), device=x_start.device
-            )
+            diff = th.randint(1, num_scales, (x_start.shape[0],), device=x_start.device)
             discrete_t2 = (discrete_t1 + diff) % num_scales
             continuous_t2 = self.get_continuous_t(discrete_t2, num_scales)
             x_t2 = self.forward_ode(x_start, continuous_t2, dims, noise=noise)
@@ -166,7 +172,8 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         else:
             raise NotImplementedError("Must have a target netG")
 
-        if teacher_netG:
+        teacher_denoise_fn = None
+        if True:
 
             @th.no_grad()
             def teacher_denoise_fn(x, t):
@@ -180,12 +187,12 @@ class CGANKarrasDenoiser(KarrasDenoiser):
             _,
             continuous_t2,
         ) = self.get_two_points_on_same_trajectory(
-            x_start,
-            num_scales,
-            dims,
-            noise,
-            teacher_netG,
-            teacher_denoise_fn,
+            x_start=x_start,
+            num_scales=num_scales,
+            dims=dims,
+            noise=noise,
+            teacher_netG=teacher_netG,
+            teacher_denoise_fn=teacher_denoise_fn,
             use_adjacent_points=self.use_adjacent_points,
             use_ode_solver=self.use_ode_solver,
         )
@@ -247,19 +254,18 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         def denoise_fn(x, t):
             return self.denoise(netG, x, t, **netG_kwargs)[1]
 
+        noise = th.randn_like(x_start)
         discrete_t1 = th.randint(
             0, num_scales - 1, (x_start.shape[0],), device=x_start.device
         )
+
         continuous_t1 = self.get_continuous_t(discrete_t1, num_scales)
         x_t1 = self.forward_ode(x_start, continuous_t1, dims, noise=noise)
 
         distiller = denoise_fn(x_t1, continuous_t1)
 
-        noise = th.randn_like(x_start)
-        continuous_t2 = self.get_continuous_t(
-            self, discrete_t1 + 1, num_scales, sigma_min=0
-        )
-        x_t2 = distiller + noise * append_dims(continuous_t2, dims)
+        continuous_t2 = self.get_continuous_t(discrete_t1 + 1, num_scales, sigma_min=0)
+        x_t2 = self.forward_ode(distiller, continuous_t2, dims, noise=noise)
 
         output = netD(x_t2, discrete_t1, x_t1.detach()).view(-1)
         errG = F.softplus(-output)
@@ -285,6 +291,8 @@ class CGANKarrasDenoiser(KarrasDenoiser):
             return self.denoise(netG, x, t, **netG_kwargs)[1]
 
         # Train with real
+        noise = th.randn_like(x_start)
+
         (
             x_t1,
             discrete_t1,
@@ -293,45 +301,40 @@ class CGANKarrasDenoiser(KarrasDenoiser):
             _,
             continuous_t2,
         ) = self.get_two_points_on_same_trajectory(
-            x_start,
-            num_scales,
-            dims,
-            noise,
+            x_start=x_start,
+            num_scales=num_scales,
+            dims=dims,
+            noise=noise,
             use_adjacent_points=False,
             use_ode_solver=False,
         )
 
         # BUG: check shape of x_pos, continuous_t1, x_t1
-        D_real = netD(x_t2, discrete_t1, x_t1.detach()).view(-1)
+        x_t1 = x_t1.detach()
+        x_t1.requires_grad = True
+        D_real = netD(x_t2, discrete_t1, x_t1).view(-1)
 
         errD_real = F.softplus(-D_real)
         errD_real = errD_real.mean()
-        errD_real.backward(retain_graph=True)
+        # errD_real.backward(retain_graph=True)
 
+        # BUG: fix this
         # encourages the discriminator to stay smooth and improves the convergence of GAN training
-        if lazy_reg is None:
+        if (lazy_reg is None) or (global_step % lazy_reg == 0):
             grad_real = th.autograd.grad(
                 outputs=D_real.sum(), inputs=x_t1, create_graph=True
             )[0]
+
             grad_penalty = (
                 grad_real.view(grad_real.size(0), -1).norm(2, dim=1) ** 2
             ).mean()
 
             grad_penalty = r1_gamma / 2 * grad_penalty
-            grad_penalty.backward()
-        else:
-            if global_step % lazy_reg == 0:
-                grad_real = th.autograd.grad(
-                    outputs=D_real.sum(), inputs=x_t1, create_graph=True
-                )[0]
-                grad_penalty = (
-                    grad_real.view(grad_real.size(0), -1).norm(2, dim=1) ** 2
-                ).mean()
-
-                grad_penalty = r1_gamma / 2 * grad_penalty
-                grad_penalty.backward()
+            # grad_penalty.backward()
 
         # Train with fake
+        noise = th.randn_like(x_start)
+
         # FIXME: pass 'distiller' to avoid recomputing and complexity
         if distiller is None:
             discrete_t1 = th.randint(
@@ -342,19 +345,15 @@ class CGANKarrasDenoiser(KarrasDenoiser):
 
             distiller = denoise_fn(x_t1, continuous_t1)
 
-        noise = th.randn_like(x_start)
-
         # NOTE: x_t2 should clean if discrete_t1 + 1 == 0, which means continuous_t2 == 0
         # BUG: check sigma_min=0 code
-        continuous_t2 = self.get_continuous_t(
-            self, discrete_t1 + 1, num_scales, sigma_min=0
-        )
-        x_t2 = distiller + noise * append_dims(continuous_t2, dims)
+        continuous_t2 = self.get_continuous_t(discrete_t1 + 1, num_scales, sigma_min=0)
+        x_t2 = self.forward_ode(distiller, continuous_t2, dims, noise=noise)
 
         D_fake = netD(x_t2, discrete_t1, x_t1.detach()).view(-1)
 
         errD_fake = F.softplus(D_fake)
         errD_fake = errD_fake.mean()
-        errD_fake.backward()
+        # errD_fake.backward()
 
         return errD_real, grad_penalty, errD_fake
