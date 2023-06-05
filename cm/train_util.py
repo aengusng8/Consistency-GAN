@@ -292,9 +292,10 @@ class CMTrainLoop(TrainLoop):
             self.target_model_param_groups_and_shapes = get_param_groups_and_shapes(
                 self.target_model.named_parameters()
             )
-            self.target_model_master_params = make_master_params(
-                self.target_model_param_groups_and_shapes
-            )
+            # self.target_model_master_params = make_master_params(
+            #     self.target_model_param_groups_and_shapes
+            # )
+            self.target_model_master_params = list(self.target_model.parameters())
 
         if teacher_model:
             self._load_and_sync_teacher_parameters()
@@ -408,10 +409,10 @@ class CMTrainLoop(TrainLoop):
                 self.mp_trainer.master_params,
                 rate=target_ema,
             )
-            master_params_to_model_params(
-                self.target_model_param_groups_and_shapes,
-                self.target_model_master_params,
-            )
+            # master_params_to_model_params(
+            #     self.target_model_param_groups_and_shapes,
+            #     self.target_model_master_params,
+            # )
 
     def reset_training_for_progdist(self):
         assert self.training_mode == "progdist", "Training mode must be progdist"
