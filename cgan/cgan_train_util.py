@@ -62,9 +62,10 @@ class ConsistencyGANTrainLoop(TrainLoop):
             self.target_netG_param_groups_and_shapes = get_param_groups_and_shapes(
                 self.target_netG.named_parameters()
             )
-            self.target_netG_master_params = make_master_params(
-                self.target_netG_param_groups_and_shapes
-            )
+            # self.target_netG_master_params = make_master_params(
+            #     self.target_netG_param_groups_and_shapes
+            # )
+            self.target_netG_master_params = list(self.target_netG.parameters())
 
         if teacher_netG:
             self._load_and_sync_teacher_parameters()
@@ -185,7 +186,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
                 if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
                     return
 
-            if self.global_step % self.log_interval == 0:
+            if (self.global_step <= 1) or (self.global_step % self.log_interval == 0):
                 logger.dumpkvs()
 
         # Save the last checkpoint if it wasn't already saved.
@@ -200,10 +201,10 @@ class ConsistencyGANTrainLoop(TrainLoop):
                 self.mp_trainerG.master_params,
                 rate=target_ema,
             )
-            master_params_to_model_params(
-                self.target_netG_param_groups_and_shapes,
-                self.target_netG_master_params,
-            )
+            # master_params_to_model_params(
+            #     self.target_netG_param_groups_and_shapes,
+            #     self.target_netG_master_params,
+            # )
 
     def run_step(self, batch, cond):
         for i in range(0, batch.shape[0], self.microbatch):
@@ -274,7 +275,8 @@ class ConsistencyGANTrainLoop(TrainLoop):
             # 2.2 Update D's parameters
             self.optimizerD.zero_grad()
             errD_real.backward(retain_graph=True)
-            grad_penalty.backward()
+            if grad_penalty:
+                grad_penalty.backward()
             errD_fake.backward()
             self.optimizerD.step()
 
@@ -325,7 +327,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
                 self.global_step += 1
 
             # logging
-            log_loss_dict(self.diffusion, t, {k: v for k, v in losses.items()})
+            logger.logkvs(losses)
             self.log_step()
 
     def save(self):
