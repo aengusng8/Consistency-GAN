@@ -320,6 +320,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
 
         # BUG: fix this
         # encourages the discriminator to stay smooth and improves the convergence of GAN training
+        grad_penalty = None
         if (lazy_reg is None) or (global_step % lazy_reg == 0):
             grad_real = th.autograd.grad(
                 outputs=D_real.sum(), inputs=x_t1, create_graph=True
