@@ -39,6 +39,7 @@ def load_data(
     if not data_dir:
         raise ValueError("unspecified data directory")
     all_files = _list_image_files_recursively(data_dir)
+    print(f"Found {len(all_files)} image files in {data_dir}")
     classes = None
     if class_cond:
         # Assume classes are the first part of the filename,
