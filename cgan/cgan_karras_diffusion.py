@@ -250,24 +250,32 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         x_start,
         num_scales,
         dims,
+        adver_focus_proportion,
+        max_num_scale,
     ):
         def denoise_fn(x, t):
             return self.denoise(netG, x, t, **netG_kwargs)[1]
 
         noise = th.randn_like(x_start)
+
         discrete_t1 = th.randint(
             0, num_scales - 1, (x_start.shape[0],), device=x_start.device
         )
-
         continuous_t1 = self.get_continuous_t(discrete_t1, num_scales)
         x_t1 = self.forward_ode(x_start, continuous_t1, dims, noise=noise)
 
         distiller = denoise_fn(x_t1, continuous_t1)
 
-        continuous_t2 = self.get_continuous_t(discrete_t1 + 1, num_scales, sigma_min=0)
+        discrete_t2 = th.randint(
+            int(adver_focus_proportion * max_num_scale),
+            max_num_scale,
+            (x_start.shape[0],),
+            device=x_start.device,
+        )
+        continuous_t2 = self.get_continuous_t(discrete_t2, num_scales, sigma_min=0)
         x_t2 = self.forward_ode(distiller, continuous_t2, dims, noise=noise)
 
-        output = netD(x_t2, discrete_t1, x_t1.detach()).view(-1)
+        output = netD(x_t2, discrete_t2, x_t1.detach()).view(-1)
         errG = F.softplus(-output)
         errG = errG.mean()
 
@@ -284,6 +292,8 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         lazy_reg,
         r1_gamma,
         global_step,
+        adver_focus_proportion,
+        max_num_scale,
         distiller=None,
     ):
         # FIXME: What if denoise_fn instead of target_denoise_fn?
@@ -293,32 +303,30 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         # Train with real
         noise = th.randn_like(x_start)
 
-        (
-            x_t1,
-            discrete_t1,
-            continuous_t1,
-            x_t2,
-            _,
-            continuous_t2,
-        ) = self.get_two_points_on_same_trajectory(
-            x_start=x_start,
-            num_scales=num_scales,
-            dims=dims,
-            noise=noise,
-            use_adjacent_points=False,
-            use_ode_solver=False,
+        discrete_t1 = th.randint(
+            0, num_scales - 1, (x_start.shape[0],), device=x_start.device
         )
+        continuous_t1 = self.get_continuous_t(discrete_t1, num_scales)
+        x_t1 = self.forward_ode(x_start, continuous_t1, dims, noise=noise)
+
+        discrete_t2 = th.randint(
+            int(adver_focus_proportion * max_num_scale),
+            max_num_scale,
+            (x_start.shape[0],),
+            device=x_start.device,
+        )
+        continuous_t2 = self.get_continuous_t(discrete_t2, num_scales, sigma_min=0)
+        x_t2 = self.forward_ode(x_start, continuous_t2, dims, noise=noise)
 
         # BUG: check shape of x_pos, continuous_t1, x_t1
         x_t1 = x_t1.detach()
         x_t1.requires_grad = True
-        D_real = netD(x_t2, discrete_t1, x_t1).view(-1)
+        D_real = netD(x_t2, discrete_t2, x_t1).view(-1)
 
         errD_real = F.softplus(-D_real)
         errD_real = errD_real.mean()
         # errD_real.backward(retain_graph=True)
 
-        # BUG: fix this
         # encourages the discriminator to stay smooth and improves the convergence of GAN training
         grad_penalty = None
         if (lazy_reg is None) or (global_step % lazy_reg == 0):
@@ -348,10 +356,16 @@ class CGANKarrasDenoiser(KarrasDenoiser):
 
         # NOTE: x_t2 should clean if discrete_t1 + 1 == 0, which means continuous_t2 == 0
         # BUG: check sigma_min=0 code
-        continuous_t2 = self.get_continuous_t(discrete_t1 + 1, num_scales, sigma_min=0)
+        discrete_t2 = th.randint(
+            int(adver_focus_proportion * max_num_scale),
+            max_num_scale,
+            (x_start.shape[0],),
+            device=x_start.device,
+        )
+        continuous_t2 = self.get_continuous_t(discrete_t2, num_scales, sigma_min=0)
         x_t2 = self.forward_ode(distiller, continuous_t2, dims, noise=noise)
 
-        D_fake = netD(x_t2, discrete_t1, x_t1.detach()).view(-1)
+        D_fake = netD(x_t2, discrete_t2, x_t1.detach()).view(-1)
 
         errD_fake = F.softplus(D_fake)
         errD_fake = errD_fake.mean()
