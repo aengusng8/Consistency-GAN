@@ -278,14 +278,16 @@ class ConsistencyGANTrainLoop(TrainLoop):
             # errD_real *= weights
             # errD_fake *= weights
             # grad_penalty *= weights
-            losses["Adversarial Discriminator Loss"] = (errD_real + errD_fake).item()
 
             # 2.2 Update D's parameters
             self.optimizerD.zero_grad()
             errD_real.backward(retain_graph=True)
+            # FIXME: naive gradient norm clipping
             if grad_penalty:
                 grad_penalty.backward()
             errD_fake.backward()
+            th.nn.utils.clip_grad_norm_(self.netD.parameters(), 1.5)
+            losses["Adversarial Discriminator Loss"] = (errD_real + errD_fake).item()
             self.optimizerD.step()
 
             for p in self.netD.parameters():
