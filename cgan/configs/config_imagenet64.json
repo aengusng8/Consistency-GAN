@@ -1,6 +1,6 @@
 {
     "dataset": {
-        "type": "imagenet64",
+        "name": "imagenet64",
         "image_size": 64,
         "location": "data/imagenet64"
     },
@@ -33,7 +33,7 @@
         "weight_schedule": "uniform"
     },
     "G": {
-        "type": "unet",
+        "size": "large",
         "image_size": 64,
         "num_channels": 192,
         "num_res_blocks": 3,
@@ -53,6 +53,7 @@
         "fp16_scale_growth": 1e-3
     },
     "D": {
+        "type": "small",
         "num_channels": 3,
         "ngf": 64,
         "t_emb_dim": 256,
