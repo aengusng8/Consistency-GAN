@@ -7,7 +7,12 @@
     "train": {
         "training_mode": "consistency_gan_training",
         "total_training_steps": 800000,
-        "global_batch_size": 2048
+        "global_batch_size": 2048,
+        "batch_size": -1,
+        "microbatch": -1,
+        "log_interval": 10,
+        "save_interval": 10000,
+        "resume_checkpoint": ""
     },
     "loss": {
         "scale_mode": "progressive",
@@ -15,7 +20,10 @@
         "end_scales": 200,
         "schedule_sampler": "uniform",
         "use_adjacent_points": false,
-        "use_ode_solver": false
+        "use_ode_solver": false,
+        "loss_norm": {
+            "lpips": 1
+        }
     },
     "diffusion": {
         "sigma_data": 0.5,
@@ -41,7 +49,8 @@
         "resblock_updown": true,
         "use_new_attention_order": false,
         "learn_sigma": false,
-        "use_fp16": false
+        "use_fp16": false,
+        "fp16_scale_growth": 1e-3
     },
     "D": {
         "num_channels": 3,
