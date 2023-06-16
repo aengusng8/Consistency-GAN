@@ -1,0 +1,78 @@
+{
+    "dataset": {
+        "type": "imagenet64",
+        "image_size": 64,
+        "location": "data/imagenet64"
+    },
+    "train": {
+        "training_mode": "consistency_gan_training",
+        "total_training_steps": 800000,
+        "global_batch_size": 2048
+    },
+    "loss": {
+        "scale_mode": "progressive",
+        "start_scales": 2,
+        "end_scales": 200,
+        "schedule_sampler": "uniform",
+        "use_adjacent_points": false,
+        "use_ode_solver": false
+    },
+    "diffusion": {
+        "sigma_data": 0.5,
+        "sigma_max": 80.0,
+        "sigma_min": 0.002,
+        "distillation": true,
+        "weight_schedule": "uniform"
+    },
+    "G": {
+        "type": "unet",
+        "image_size": 64,
+        "num_channels": 192,
+        "num_res_blocks": 3,
+        "num_heads": 4,
+        "num_heads_upsample": -1,
+        "num_head_channels": 64,
+        "attention_resolutions": "32,16,8",
+        "channel_mult": "",
+        "dropout": 0.0,
+        "class_cond": true,
+        "use_checkpoint": false,
+        "use_scale_shift_norm": true,
+        "resblock_updown": true,
+        "use_new_attention_order": false,
+        "learn_sigma": false,
+        "use_fp16": false
+    },
+    "D": {
+        "num_channels": 3,
+        "ngf": 64,
+        "t_emb_dim": 256,
+        "patch_size": 1,
+        "use_local_loss": false
+    },
+    "teacherG": {
+        "teacher_dropout": 0.1
+    },
+    "optG": {
+        "type": "RAdam",
+        "lr_anneal_steps": 0,
+        "lr": 0.0001,
+        "weight_decay": 0.0
+    },
+    "EMA": {
+        "target_ema_mode": "adaptive",
+        "start_ema": 0.95,
+        "ema_rate": [
+            0.999,
+            0.9999,
+            0.9999432189950708
+        ]
+    },
+    "optD": {
+        "type": "Adam",
+        "lr": 1.25e-4,
+        "weight_decay": 0.0,
+        "lazy_reg": 15,
+        "r1_gamma": 0.02
+    }
+}
