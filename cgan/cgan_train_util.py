@@ -31,9 +31,9 @@ class ConsistencyGANTrainLoop(TrainLoop):
     def __init__(
         self,
         *,
-        netD,
-        target_netG,
-        teacher_netG,
+        D,
+        target_G,
+        teacher_G,
         teacher_diffusion,
         training_mode,
         ema_scale_fn,
@@ -46,48 +46,48 @@ class ConsistencyGANTrainLoop(TrainLoop):
 
         self.training_mode = training_mode
         self.ema_scale_fn = ema_scale_fn
-        self.netD = netD
-        self.target_netG = target_netG
-        self.teacher_netG = teacher_netG
+        self.D = D
+        self.target_G = target_G
+        self.teacher_G = teacher_G
         self.teacher_diffusion = teacher_diffusion
         self.total_training_steps = total_training_steps
         self.lazy_reg = lazy_reg
         self.r1_gamma = r1_gamma
 
-        if target_netG:
+        if target_G:
             self._load_and_sync_target_parameters()
-            self.target_netG.requires_grad_(False)
-            self.target_netG.train()
+            self.target_G.requires_grad_(False)
+            self.target_G.train()
 
-            self.target_netG_param_groups_and_shapes = get_param_groups_and_shapes(
-                self.target_netG.named_parameters()
+            self.target_G_param_groups_and_shapes = get_param_groups_and_shapes(
+                self.target_G.named_parameters()
             )
-            # self.target_netG_master_params = make_master_params(
-            #     self.target_netG_param_groups_and_shapes
+            # self.target_G_master_params = make_master_params(
+            #     self.target_G_param_groups_and_shapes
             # )
-            self.target_netG_master_params = list(self.target_netG.parameters())
+            self.target_G_master_params = list(self.target_G.parameters())
 
-        if teacher_netG:
+        if teacher_G:
             self._load_and_sync_teacher_parameters()
-            self.teacher_netG.requires_grad_(False)
-            self.teacher_netG.eval()
+            self.teacher_G.requires_grad_(False)
+            self.teacher_G.eval()
 
         self.global_step = self.step
 
         # Generator
-        self.netG = self.ddp_model
+        self.G = self.ddp_model
         self.mp_trainerG = self.mp_trainer
         self.optimizerG = self.opt
 
         # Discriminator
-        # TODO: create MixedPrecisionTrainer (EMA and resume, if needed) for netD
-        # self.netD_mp_trainer = MixedPrecisionTrainer(
-        #     model=self.netD,
+        # TODO: create MixedPrecisionTrainer (EMA and resume, if needed) for D
+        # self.D_mp_trainer = MixedPrecisionTrainer(
+        #     model=self.D,
         #     use_fp16=self.use_fp16,
         #     fp16_scale_growth=self.fp16_scale_growth,
         # )
         self.optimizerD = RAdam(
-            self.netD.parameters(), lr=self.lr, weight_decay=self.weight_decay
+            self.D.parameters(), lr=self.lr, weight_decay=self.weight_decay
         )
         num_epoch = self.total_training_steps // self.microbatch
         self.schedulerD = th.optim.lr_scheduler.CosineAnnealingLR(
@@ -102,21 +102,21 @@ class ConsistencyGANTrainLoop(TrainLoop):
             self.compute_consistency_generator_loss = functools.partial(
                 self.diffusion.consistency_generator_loss,
                 self.ddp_model,
-                target_netG=self.target_netG,
-                teacher_netG=self.teacher_netG,
+                target_G=self.target_G,
+                teacher_G=self.teacher_G,
                 teacher_diffusion=self.teacher_diffusion,
             )
         elif self.training_mode == "consistency_gan_training":
             self.compute_consistency_generator_loss = functools.partial(
                 self.diffusion.consistency_generator_loss,
                 self.ddp_model,
-                target_netG=self.target_netG,
+                target_G=self.target_G,
             )
         else:
             raise ValueError(f"Unknown training mode {self.training_mode}")
 
         # TODO: put it in the config
-        adver_focus_proportion = 0.6  # control the difficulty of netD
+        adver_focus_proportion = 0.6 # control the difficulty of D
         _, max_num_scale = self.ema_scale_fn(self.total_training_steps)
 
         # 2. Adversarial Generator Loss
@@ -137,40 +137,40 @@ class ConsistencyGANTrainLoop(TrainLoop):
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         if resume_checkpoint:
             path, name = os.path.split(resume_checkpoint)
-            target_name = name.replace("model", "target_netG")
+            target_name = name.replace("model", "target_G")
             resume_target_checkpoint = os.path.join(path, target_name)
             if bf.exists(resume_target_checkpoint) and dist.get_rank() == 0:
                 logger.log(
                     "loading model from checkpoint: {resume_target_checkpoint}..."
                 )
-                self.target_netG.load_state_dict(
+                self.target_G.load_state_dict(
                     dist_util.load_state_dict(
                         resume_target_checkpoint, map_location=dist_util.dev()
                     ),
                 )
 
-        dist_util.sync_params(self.target_netG.parameters())
-        dist_util.sync_params(self.target_netG.buffers())
+        dist_util.sync_params(self.target_G.parameters())
+        dist_util.sync_params(self.target_G.buffers())
 
     def _load_and_sync_teacher_parameters(self):
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         if resume_checkpoint:
             path, name = os.path.split(resume_checkpoint)
-            teacher_name = name.replace("model", "teacher_netG")
+            teacher_name = name.replace("model", "teacher_G")
             resume_teacher_checkpoint = os.path.join(path, teacher_name)
 
             if bf.exists(resume_teacher_checkpoint) and dist.get_rank() == 0:
                 logger.log(
                     "loading model from checkpoint: {resume_teacher_checkpoint}..."
                 )
-                self.teacher_netG.load_state_dict(
+                self.teacher_G.load_state_dict(
                     dist_util.load_state_dict(
                         resume_teacher_checkpoint, map_location=dist_util.dev()
                     ),
                 )
 
-        dist_util.sync_params(self.teacher_netG.parameters())
-        dist_util.sync_params(self.teacher_netG.buffers())
+        dist_util.sync_params(self.teacher_G.parameters())
+        dist_util.sync_params(self.teacher_G.buffers())
 
     def run_loop(self):
         saved = False
@@ -205,13 +205,13 @@ class ConsistencyGANTrainLoop(TrainLoop):
         target_ema, scales = self.ema_scale_fn(self.global_step)
         with th.no_grad():
             update_ema(
-                self.target_netG_master_params,
+                self.target_G_master_params,
                 self.mp_trainerG.master_params,
                 rate=target_ema,
             )
             # master_params_to_model_params(
-            #     self.target_netG_param_groups_and_shapes,
-            #     self.target_netG_master_params,
+            #     self.target_G_param_groups_and_shapes,
+            #     self.target_G_master_params,
             # )
 
     def run_step(self, batch, cond):
@@ -232,41 +232,41 @@ class ConsistencyGANTrainLoop(TrainLoop):
             # 1. Consistency Generator Loss
             # 1.1 Compute the G's loss
             if last_batch or not self.use_ddp:
-                consis_netG_loss = self.compute_consistency_generator_loss(
+                consis_G_loss = self.compute_consistency_generator_loss(
                     x_start=micro,
                     num_scales=num_scales,
-                    netG_kwargs=micro_cond,
+                    G_kwargs=micro_cond,
                 )
             else:
                 with self.ddp_model.no_sync():
-                    consis_netG_loss = self.compute_consistency_generator_loss(
+                    consis_G_loss = self.compute_consistency_generator_loss(
                         x_start=micro,
                         num_scales=num_scales,
-                        netG_kwargs=micro_cond,
+                        G_kwargs=micro_cond,
                     )
 
-            consis_netG_loss = (consis_netG_loss * weights).mean()
-            losses["Consistency Generator Loss"] = consis_netG_loss.item()
+            consis_G_loss = (consis_G_loss * weights).mean()
+            losses["Consistency Generator Loss"] = consis_G_loss.item()
 
             # 1.2 Update G's parameters
             self.mp_trainerG.zero_grad()
-            self.mp_trainerG.backward(consis_netG_loss)
+            self.mp_trainerG.backward(consis_G_loss)
             took_step = self.mp_trainerG.optimize(self.optimizerG)
 
             # 2. Adversarial Discriminator Loss
             # 2.1 Compute the D's loss
-            for p in self.netD.parameters():
+            for p in self.D.parameters():
                 p.requires_grad = True
-            self.netD.zero_grad()
+            self.D.zero_grad()
 
             (
                 errD_real,
                 grad_penalty,
                 errD_fake,
             ) = self.compute_adversarial_discriminator_loss(
-                netD=self.netD,
-                netG=self.netG,
-                netG_kwargs=micro_cond,
+                D=self.D,
+                G=self.G,
+                G_kwargs=micro_cond,
                 x_start=micro,
                 num_scales=num_scales,
                 dims=micro.ndim,
@@ -286,52 +286,52 @@ class ConsistencyGANTrainLoop(TrainLoop):
             if grad_penalty:
                 grad_penalty.backward()
             errD_fake.backward()
-            th.nn.utils.clip_grad_norm_(self.netD.parameters(), 1.5)
+            th.nn.utils.clip_grad_norm_(self.D.parameters(), 1.5)
             losses["Adversarial Discriminator Loss"] = (errD_real + errD_fake).item()
             self.optimizerD.step()
 
-            for p in self.netD.parameters():
+            for p in self.D.parameters():
                 p.requires_grad = False
 
             # 3. Adversarial Generator Loss
             # 3.1 Compute the G's loss
             if last_batch or not self.use_ddp:
-                adver_netG_loss = self.compute_adversarial_generator_loss(
-                    netD=self.netD,
-                    netG=self.netG,
-                    netG_kwargs=micro_cond,
+                adver_G_loss = self.compute_adversarial_generator_loss(
+                    D=self.D,
+                    G=self.G,
+                    G_kwargs=micro_cond,
                     x_start=micro,
                     num_scales=num_scales,
                     dims=micro.ndim,
                 )
             else:
                 with self.ddp_model.no_sync():
-                    adver_netG_loss = self.compute_adversarial_generator_loss(
-                        netD=self.netD,
-                        netG=self.netG,
-                        netG_kwargs=micro_cond,
+                    adver_G_loss = self.compute_adversarial_generator_loss(
+                        D=self.D,
+                        G=self.G,
+                        G_kwargs=micro_cond,
                         x_start=micro,
                         num_scales=num_scales,
                         dims=micro.ndim,
                     )
 
-            # adver_netG_loss *= weights
-            losses["Adversarial Generator Loss"] = adver_netG_loss.item()
+            # adver_G_loss *= weights
+            losses["Adversarial Generator Loss"] = adver_G_loss.item()
             # 3.2 Update G's parameters
             self.mp_trainerG.zero_grad()
-            self.mp_trainerG.backward(adver_netG_loss)
+            self.mp_trainerG.backward(adver_G_loss)
             _ = self.mp_trainerG.optimize(self.optimizerG)
 
-            # NOTE, try: netG_loss = consis_netG_loss
-            netG_loss = consis_netG_loss + adver_netG_loss
+            # NOTE, try: G_loss = consis_G_loss
+            G_loss = consis_G_loss + adver_G_loss
 
             # Weighting the losses
             if isinstance(self.schedule_sampler, LossAwareSampler):
-                self.schedule_sampler.update_with_local_losses(t, netG_loss.detach())
+                self.schedule_sampler.update_with_local_losses(t, G_loss.detach())
 
             if took_step:
                 self._update_ema()
-                if self.target_netG:
+                if self.target_G:
                     self._update_target_ema()
                 self.step += 1
                 self.global_step += 1
@@ -348,11 +348,11 @@ class ConsistencyGANTrainLoop(TrainLoop):
         def save_checkpoint(rate, params):
             state_dict = self.mp_trainerG.master_params_to_state_dict(params)
             if dist.get_rank() == 0:
-                logger.log(f"saving netG {rate}...")
+                logger.log(f"saving G {rate}...")
                 if not rate:
-                    filename = f"netG__{step:06d}.pt"
+                    filename = f"G__{step:06d}.pt"
                 else:
-                    filename = f"ema-netG__{rate}_{step:06d}.pt"
+                    filename = f"ema-G__{rate}_{step:06d}.pt"
                 with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
                     th.save(state_dict, f)
 
@@ -368,16 +368,16 @@ class ConsistencyGANTrainLoop(TrainLoop):
                 th.save(self.optimizerG.state_dict(), f)
 
         if dist.get_rank() == 0:
-            if self.target_netG:
+            if self.target_G:
                 logger.log("saving target model state")
-                filename = f"target_netG{step:06d}.pt"
+                filename = f"target_G{step:06d}.pt"
                 with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
-                    th.save(self.target_netG.state_dict(), f)
-            if self.teacher_netG and self.training_mode == "progdist":
+                    th.save(self.target_G.state_dict(), f)
+            if self.teacher_G and self.training_mode == "progdist":
                 logger.log("saving teacher model state")
-                filename = f"teacher_netG{step:06d}.pt"
+                filename = f"teacher_G{step:06d}.pt"
                 with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
-                    th.save(self.teacher_netG.state_dict(), f)
+                    th.save(self.teacher_G.state_dict(), f)
 
         # Save model parameters last to prevent race conditions where a restart
         # loads model at step N, but optimizerG/ema state isn't saved for step N.

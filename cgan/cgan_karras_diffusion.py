@@ -51,21 +51,21 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         continuous_t1,
         continuous_t2,
         x_start,
-        teacher_netG,
+        teacher_G,
         teacher_denoise_fn,
         dims,
     ):
         @th.no_grad()
         def heun_solver(samples, t, next_t, x0):
             x = samples
-            if teacher_netG is None:
+            if teacher_G is None:
                 denoiser = x0
             else:
                 denoiser = teacher_denoise_fn(x, t)
 
             d = (x - denoiser) / append_dims(t, dims)
             samples = x + d * append_dims(next_t - t, dims)
-            if teacher_netG is None:
+            if teacher_G is None:
                 denoiser = x0
             else:
                 denoiser = teacher_denoise_fn(samples, next_t)
@@ -78,7 +78,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         @th.no_grad()
         def euler_solver(samples, t, next_t, x0):
             x = samples
-            if teacher_netG is None:
+            if teacher_G is None:
                 denoiser = x0
             else:
                 denoiser = teacher_denoise_fn(x, t)
@@ -87,7 +87,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
 
             return samples
 
-        ode_solver = euler_solver if teacher_netG is None else heun_solver
+        ode_solver = euler_solver if teacher_G is None else heun_solver
         x_t2 = ode_solver(x_t1, continuous_t1, continuous_t2, x_start).detach()
 
         return x_t2
@@ -100,7 +100,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         use_adjacent_points,
         use_ode_solver,
         noise=None,
-        teacher_netG=None,
+        teacher_G=None,
         teacher_denoise_fn=None,
     ):
         if noise is None:
@@ -119,15 +119,15 @@ class CGANKarrasDenoiser(KarrasDenoiser):
 
             if use_ode_solver:
                 assert (
-                    teacher_netG is not None
-                ), "teacher_netG must be provided if using ODE solver"
+                    teacher_G is not None
+                ), "teacher_G must be provided if using ODE solver"
 
                 x_t2 = self.ode_solve_adjacent_point(
                     x_t1,
                     continuous_t1,
                     continuous_t2,
                     x_start,
-                    teacher_netG,
+                    teacher_G,
                     teacher_denoise_fn,
                     dims,
                 )
@@ -144,40 +144,40 @@ class CGANKarrasDenoiser(KarrasDenoiser):
 
     def consistency_generator_loss(
         self,
-        netG,
+        G,
         x_start,
         num_scales,
-        netG_kwargs=None,
-        target_netG=None,
-        teacher_netG=None,
+        G_kwargs=None,
+        target_G=None,
+        teacher_G=None,
         teacher_diffusion=None,
         noise=None,
     ):
-        if netG_kwargs is None:
-            netG_kwargs = {}
+        if G_kwargs is None:
+            G_kwargs = {}
         if noise is None:
             noise = th.randn_like(x_start)
 
         dims = x_start.ndim
 
         def denoise_fn(x, t):
-            return self.denoise(netG, x, t, **netG_kwargs)[1]
+            return self.denoise(G, x, t, **G_kwargs)[1]
 
-        if target_netG:
+        if target_G:
 
             @th.no_grad()
             def target_denoise_fn(x, t):
-                return self.denoise(target_netG, x, t, **netG_kwargs)[1]
+                return self.denoise(target_G, x, t, **G_kwargs)[1]
 
         else:
-            raise NotImplementedError("Must have a target netG")
+            raise NotImplementedError("Must have a target G")
 
         teacher_denoise_fn = None
         if True:
 
             @th.no_grad()
             def teacher_denoise_fn(x, t):
-                return teacher_diffusion.denoise(teacher_netG, x, t, **netG_kwargs)[1]
+                return teacher_diffusion.denoise(teacher_G, x, t, **G_kwargs)[1]
 
         (
             x_t1,
@@ -191,7 +191,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
             num_scales=num_scales,
             dims=dims,
             noise=noise,
-            teacher_netG=teacher_netG,
+            teacher_G=teacher_G,
             teacher_denoise_fn=teacher_denoise_fn,
             use_adjacent_points=self.use_adjacent_points,
             use_ode_solver=self.use_ode_solver,
@@ -208,10 +208,10 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         weights = get_weightings(self.weight_schedule, snrs, self.sigma_data)
 
         # Generator loss
-        netG_loss = 0
+        G_loss = 0
         if "l2" in self.loss_norm.keys():
             diffs = (distiller - distiller_target) ** 2
-            netG_loss += mean_flat(diffs) * self.loss_norm["l2"]
+            G_loss += mean_flat(diffs) * self.loss_norm["l2"]
 
         if "l2-32" in self.loss_norm.keys():
             distiller = F.interpolate(distiller, size=32, mode="bilinear")
@@ -221,7 +221,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
                 mode="bilinear",
             )
             diffs = (distiller - distiller_target) ** 2
-            netG_loss += mean_flat(diffs) * self.loss_norm["l2-32"]
+            G_loss += mean_flat(diffs) * self.loss_norm["l2-32"]
 
         if "lpips" in self.loss_norm.keys():
             if x_start.shape[-1] < 256:
@@ -230,7 +230,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
                     distiller_target, size=224, mode="bilinear"
                 )
 
-            netG_loss += (
+            G_loss += (
                 self.lpips_loss(
                     (distiller + 1) / 2.0,
                     (distiller_target + 1) / 2.0,
@@ -238,15 +238,15 @@ class CGANKarrasDenoiser(KarrasDenoiser):
                 * self.loss_norm["lpips"]
             )
 
-        netG_loss *= weights
+        G_loss *= weights
 
-        return netG_loss  # Consistency Generator Loss
+        return G_loss  # Consistency Generator Loss
 
     def adversarial_generator_loss(
         self,
-        netD,
-        netG,
-        netG_kwargs,
+        D,
+        G,
+        G_kwargs,
         x_start,
         num_scales,
         dims,
@@ -254,7 +254,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         max_num_scale,
     ):
         def denoise_fn(x, t):
-            return self.denoise(netG, x, t, **netG_kwargs)[1]
+            return self.denoise(G, x, t, **G_kwargs)[1]
 
         noise = th.randn_like(x_start)
 
@@ -275,7 +275,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         continuous_t2 = self.get_continuous_t(discrete_t2, num_scales, sigma_min=0)
         x_t2 = self.forward_ode(distiller, continuous_t2, dims, noise=noise)
 
-        output = netD(x_t2, discrete_t2, x_t1.detach()).view(-1)
+        output = D(x_t2, discrete_t2, x_t1.detach()).view(-1)
         errG = F.softplus(-output)
         errG = errG.mean()
 
@@ -283,9 +283,9 @@ class CGANKarrasDenoiser(KarrasDenoiser):
 
     def adversarial_discriminator_loss(
         self,
-        netD,
-        netG,
-        netG_kwargs,
+        D,
+        G,
+        G_kwargs,
         x_start,
         num_scales,
         dims,
@@ -298,7 +298,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
     ):
         # FIXME: What if denoise_fn instead of target_denoise_fn?
         def denoise_fn(x, t):
-            return self.denoise(netG, x, t, **netG_kwargs)[1]
+            return self.denoise(G, x, t, **G_kwargs)[1]
 
         # Train with real
         noise = th.randn_like(x_start)
@@ -321,7 +321,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         # BUG: check shape of x_pos, continuous_t1, x_t1
         x_t1 = x_t1.detach()
         x_t1.requires_grad = True
-        D_real = netD(x_t2, discrete_t2, x_t1).view(-1)
+        D_real = D(x_t2, discrete_t2, x_t1).view(-1)
 
         errD_real = F.softplus(-D_real)
         errD_real = errD_real.mean()
@@ -365,7 +365,7 @@ class CGANKarrasDenoiser(KarrasDenoiser):
         continuous_t2 = self.get_continuous_t(discrete_t2, num_scales, sigma_min=0)
         x_t2 = self.forward_ode(distiller, continuous_t2, dims, noise=noise)
 
-        D_fake = netD(x_t2, discrete_t2, x_t1.detach()).view(-1)
+        D_fake = D(x_t2, discrete_t2, x_t1.detach()).view(-1)
 
         errD_fake = F.softplus(D_fake)
         errD_fake = errD_fake.mean()
