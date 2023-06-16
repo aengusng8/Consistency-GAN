@@ -22,3 +22,6 @@ dist/
 
 # Consistancy Model (Song et al., ICML'23)
 cm/
+
+# logging
+wandb/
