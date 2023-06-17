@@ -352,7 +352,8 @@ class ConsistencyGANTrainLoop(TrainLoop):
         import blobfile as bf
 
         step = self.global_step
-
+        logger.log(f"Saving checkpoint at step {step}")
+        logger.log(f"Saving path: {get_blob_logdir()}")
         def save_checkpoint(rate, params):
             state_dict = self.mp_trainerG.master_params_to_state_dict(params)
             if dist.get_rank() == 0:
