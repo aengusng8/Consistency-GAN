@@ -8,7 +8,6 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 
 from cm import dist_util, logger
-from cm.image_datasets import load_data
 from cm.resample import create_named_schedule_sampler
 from cm.script_util import (
     args_to_dict,
@@ -17,8 +16,9 @@ from cm.script_util import (
 )
 from cgan.cgan_train_util import ConsistencyGANTrainLoop
 from cgan.cgan_karras_diffusion import CGANKarrasDenoiser
-from cgan.D_nn.discriminator import Discriminator_small, Discriminator_large
-from cgan.configs.config import load_config, create_G, create_D, seed_everything
+from cgan.configs.config import load_config, seed_everything
+from cgan.models import create_G, create_D
+from cgan.dataloader import load_data_generator
 
 import torch.distributed as dist
 import torch.nn as nn
@@ -42,7 +42,7 @@ def main(config):
 
     # Discriminator
     D = create_D(config["D"]).to(dist_util.dev())
-    logger.log(f"Created {config['D']['type']} G for {config['dataset']['name']}")
+    logger.log(f"Created {config['D']['type']} D for {config['dataset']['name']}")
 
     # Generator
     G = create_G(config["G"]).to(dist_util.dev())
@@ -75,12 +75,8 @@ def main(config):
     else:
         batch_size = config["train"]["batch_size"]
 
-    data = load_data(
-        data_dir=config["dataset"]["location"],
-        batch_size=batch_size,
-        image_size=config["dataset"]["image_size"],
-        class_cond=config["G"]["class_cond"],
-    )
+    config["train"]["batch_size"] = batch_size
+    data = load_data_generator(config)
     logger.log("Created data loader")
 
     # Teacher model
