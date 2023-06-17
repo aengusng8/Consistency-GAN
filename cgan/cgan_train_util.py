@@ -6,7 +6,7 @@ import blobfile as bf
 import torch as th
 import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.optim import RAdam
+from torch.optim import RAdam, Adam
 
 from cm import dist_util, logger
 from cm.fp16_util import MixedPrecisionTrainer
@@ -89,7 +89,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
         #     use_fp16=self.use_fp16,
         #     fp16_scale_growth=self.fp16_scale_growth,
         # )
-        self.optimizerD = RAdam(
+        self.optimizerD = Adam(
             self.D.parameters(), lr=self.lr, weight_decay=self.weight_decay
         )
         num_epoch = self.total_training_steps // self.microbatch
