@@ -33,7 +33,7 @@
         "weight_schedule": "uniform"
     },
     "G": {
-        "size": "large",
+        "type": "large",
         "image_size": 64,
         "num_channels": 192,
         "num_res_blocks": 3,
@@ -61,7 +61,8 @@
         "use_local_loss": false
     },
     "teacherG": {
-        "teacher_dropout": 0.1
+        "teacher_dropout": 0.1,
+        "teacher_model_path": ""
     },
     "optG": {
         "type": "RAdam",
@@ -72,11 +73,7 @@
     "EMA": {
         "target_ema_mode": "adaptive",
         "start_ema": 0.95,
-        "ema_rate": [
-            0.999,
-            0.9999,
-            0.9999432189950708
-        ],
+        "ema_rate": "0.999,0.9999,0.9999432189950708",
         "distill_steps_per_iter": 50000
     },
     "optD": {
