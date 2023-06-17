@@ -5,6 +5,7 @@ from cgan.D_nn.discriminator import Discriminator_small, Discriminator_large
 import torch.nn as nn
 from torch.nn import init
 
+
 def create_small_G(config):
     if "kdiffusion" in config["type"]:
         config = config["kdiffusion"]
@@ -44,8 +45,8 @@ def create_small_G(config):
             G.conv_out.weight.data.zero_()
 
         class UNet(UNet2DModel):
-            def forward(self, x):
-                return super().forward(*x).sample
+            def forward(self, x, timestep, **kwargs):
+                return super().forward(x, timestep=timestep, **kwargs).sample
 
         G = UNet(
             in_channels=config["in_channels"],
