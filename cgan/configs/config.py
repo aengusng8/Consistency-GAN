@@ -6,7 +6,7 @@ import warnings
 from jsonmerge import merge
 
 from ..G_nn import layers
-from ..G_nn.tiny_unet import ImageDenoiserModelV1
+from ..G_nn.small_unet import ImageDenoiserModelV1
 from cm.script_util import create_model as create_large_G
 from cgan.D_nn.discriminator import Discriminator_small, Discriminator_large
 
