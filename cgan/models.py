@@ -1,6 +1,6 @@
 from .G_nn.small_unet import ImageDenoiserModelV1
 from cm.script_util import create_model as create_large_G
-from cgan.D_nn.discriminator import Discriminator_small, Discriminator_large
+from cgan.D_nn.score_sde.models.discriminator import Discriminator_small, Discriminator_large
 
 import torch.nn as nn
 from torch.nn import init

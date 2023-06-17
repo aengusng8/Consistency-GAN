@@ -236,3 +236,4 @@ class Discriminator_large(nn.Module):
     out = self.end_linear(out)
     
     return out
+
