@@ -1,0 +1,116 @@
+{
+    "dataset": {
+        "name": "fashion_mnist",
+        "image_size": 28,
+        "location": "../datasets/fashion_mnist"
+    },
+    "train": {
+        "training_mode": "consistency_gan_training",
+        "total_training_steps": 800000,
+        "global_batch_size": 2,
+        "batch_size": -1,
+        "microbatch": -1,
+        "log_interval": 10,
+        "save_interval": 10000,
+        "resume_checkpoint": ""
+    },
+    "loss": {
+        "scale_mode": "progressive",
+        "start_scales": 2,
+        "end_scales": 200,
+        "schedule_sampler": "uniform",
+        "use_adjacent_points": false,
+        "use_ode_solver": false,
+        "loss_norm": {
+            "lpips": 1
+        }
+    },
+    "diffusion": {
+        "sigma_data": 0.5,
+        "sigma_max": 80.0,
+        "sigma_min": 0.002,
+        "distillation": true,
+        "weight_schedule": "uniform"
+    },
+    "G": {
+        "type": "small-huggingface",
+        "huggingface": {
+            "in_channels": 1,
+            "out_channels": 1,
+            "block_out_channels": [
+                32,
+                64,
+                128,
+                256
+            ],
+            "norm_num_groups": 8
+        },
+        "kdiffusion": {
+            "input_channels": 1,
+            "input_size": [
+                32,
+                32
+            ],
+            "patch_size": 1,
+            "mapping_out": 256,
+            "depths": [
+                2,
+                4,
+                4
+            ],
+            "channels": [
+                128,
+                128,
+                256
+            ],
+            "self_attn_depths": [
+                false,
+                false,
+                true
+            ],
+            "has_variance": true,
+            "dropout_rate": 0.05,
+            "augment_wrapper": true,
+            "augment_prob": 0.12,
+            "sigma_data": 0.6162,
+            "sigma_min": 1e-2,
+            "sigma_max": 80,
+            "sigma_sample_density": {
+                "type": "lognormal",
+                "mean": -1.2,
+                "std": 1.2
+            }
+        }
+    },
+    "D": {
+        "type": "small",
+        "num_channels": 1,
+        "ngf": 64, 
+        "t_emb_dim": 256,
+        "patch_size": 1,
+        "use_local_loss": false
+    },
+    "teacherG": {
+        "teacher_dropout": 0.1,
+        "teacher_model_path": ""
+    },
+    "optG": {
+        "type": "RAdam",
+        "lr_anneal_steps": 0,
+        "lr": 0.0001,
+        "weight_decay": 0.0
+    },
+    "EMA": {
+        "target_ema_mode": "adaptive",
+        "start_ema": 0.95,
+        "ema_rate": "0.999,0.9999,0.9999432189950708",
+        "distill_steps_per_iter": 50000
+    },
+    "optD": {
+        "type": "Adam",
+        "lr": 1.25e-4,
+        "weight_decay": 0.0,
+        "lazy_reg": 15,
+        "r1_gamma": 0.02
+    }
+}
