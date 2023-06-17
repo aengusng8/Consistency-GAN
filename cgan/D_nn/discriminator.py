@@ -1,6 +1,3 @@
-"""
-from https://github.com/NVlabs/denoising-diffusion-gan/blob/main/score_sde/models/discriminator.py 
-"""
 # ---------------------------------------------------------------
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 #
