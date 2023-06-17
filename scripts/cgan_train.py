@@ -153,6 +153,7 @@ def main(config):
         lr_anneal_steps=config["optG"]["lr_anneal_steps"],
         lazy_reg=config["optD"]["lazy_reg"],
         r1_gamma=config["optD"]["r1_gamma"],
+        grad_clip=config["optD"]["grad_clip"],
     ).run_loop()
 
 

@@ -40,6 +40,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
         total_training_steps,
         lazy_reg,
         r1_gamma,
+        grad_clip,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -53,6 +54,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
         self.total_training_steps = total_training_steps
         self.lazy_reg = lazy_reg
         self.r1_gamma = r1_gamma
+        self.grad_clip = grad_clip
 
         if target_G:
             self._load_and_sync_target_parameters()
@@ -286,7 +288,8 @@ class ConsistencyGANTrainLoop(TrainLoop):
             if grad_penalty:
                 grad_penalty.backward()
             errD_fake.backward()
-            th.nn.utils.clip_grad_norm_(self.D.parameters(), 1.5)
+            if self.grad_clip:
+                th.nn.utils.clip_grad_norm_(self.D.parameters(),  self.grad_clip)
             losses["Adversarial Discriminator Loss"] = (errD_real + errD_fake).item()
             self.optimizerD.step()
 

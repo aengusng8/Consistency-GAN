@@ -81,6 +81,7 @@
         "lr": 1.25e-4,
         "weight_decay": 0.0,
         "lazy_reg": 15,
-        "r1_gamma": 0.02
+        "r1_gamma": 0.02,
+        "grad_clip": false
     }
 }
