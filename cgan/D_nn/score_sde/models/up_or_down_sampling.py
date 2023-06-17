@@ -5,14 +5,14 @@
 
 """Layers used for up-sampling or down-sampling images.
 
-Many functions are ported from https://github.com/NVlabs/stylegan2.
+Many functions are ported from https://gixthub.com/NVlabs/stylegan2.
 """
 
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
 import numpy as np
-from score_sde.op import upfirdn2d
+from ..op import upfirdn2d
 
 
 # Function ported from StyleGAN2
