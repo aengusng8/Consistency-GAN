@@ -154,6 +154,7 @@ def main(config):
         lazy_reg=config["optD"]["lazy_reg"],
         r1_gamma=config["optD"]["r1_gamma"],
         grad_clip=config["optD"]["grad_clip"],
+        adver_focus_proportion=config["loss"]["adver_focus_proportion"],
     ).run_loop()
 
 

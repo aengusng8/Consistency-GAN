@@ -23,7 +23,8 @@
         "use_ode_solver": false,
         "loss_norm": {
             "lpips": 1
-        }
+        },
+        "adver_focus_proportion": 0.4
     },
     "diffusion": {
         "sigma_data": 0.5,

@@ -42,6 +42,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
         lazy_reg,
         r1_gamma,
         grad_clip,
+        adver_focus_proportion,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -56,6 +57,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
         self.lazy_reg = lazy_reg
         self.r1_gamma = r1_gamma
         self.grad_clip = grad_clip
+        self.adver_focus_proportion = adver_focus_proportion
 
         if target_G:
             self._load_and_sync_target_parameters()
@@ -119,20 +121,19 @@ class ConsistencyGANTrainLoop(TrainLoop):
             raise ValueError(f"Unknown training mode {self.training_mode}")
 
         # TODO: put it in the config
-        adver_focus_proportion = 0.6  # control the difficulty of D
         _, max_num_scale = self.ema_scale_fn(self.total_training_steps)
 
         # 2. Adversarial Generator Loss
         self.compute_adversarial_generator_loss = functools.partial(
             self.diffusion.adversarial_generator_loss,
-            adver_focus_proportion=adver_focus_proportion,
+            adver_focus_proportion=self.adver_focus_proportion,
             max_num_scale=max_num_scale,
         )
 
         # 3. Adversarial Discriminator Loss
         self.compute_adversarial_discriminator_loss = functools.partial(
             self.diffusion.adversarial_discriminator_loss,
-            adver_focus_proportion=adver_focus_proportion,
+            adver_focus_proportion=self.adver_focus_proportion,
             max_num_scale=max_num_scale,
         )
 
@@ -290,9 +291,12 @@ class ConsistencyGANTrainLoop(TrainLoop):
             if grad_penalty:
                 grad_penalty.backward()
             errD_fake.backward()
-            if self.grad_clip:
-                th.nn.utils.clip_grad_norm_(self.D.parameters(), self.grad_clip)
+            # if self.grad_clip:
+            #     th.nn.utils.clip_grad_norm_(self.D.parameters(), self.grad_clip)
             losses["Adversarial Discriminator Loss"] = (errD_real + errD_fake).item()
+            losses["Real-Discriminator Loss"] = errD_real.item()
+            losses["Fake-Discriminator Loss"] = errD_fake.item()
+            losses["Gradient Penalty (Discriminator)"] = grad_penalty.item() if grad_penalty else 0.0
             self.optimizerD.step()
 
             for p in self.D.parameters():
