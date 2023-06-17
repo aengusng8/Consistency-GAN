@@ -173,6 +173,11 @@ def create_argparser():
     # p.add_argument(
     #     "--wandb-save-model", action="store_true", help="save model to wandb"
     # )
+    p.add_argument(
+        "--wandb-key",
+        type=str,
+        help="authentication key",
+    )
     args = p.parse_args()
     return args
 
@@ -182,6 +187,8 @@ if __name__ == "__main__":
 
     args = create_argparser()
     config = load_config(open(args.config))
+
+    wandb.login(key=args.wandb_key)
 
     wandb.init(
         project=args.wandb_project,

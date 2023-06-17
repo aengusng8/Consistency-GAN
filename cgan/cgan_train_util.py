@@ -25,6 +25,7 @@ from cm.fp16_util import (
     master_params_to_model_params,
 )
 import numpy as np
+import wandb
 
 
 class ConsistencyGANTrainLoop(TrainLoop):
@@ -118,7 +119,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
             raise ValueError(f"Unknown training mode {self.training_mode}")
 
         # TODO: put it in the config
-        adver_focus_proportion = 0.6 # control the difficulty of D
+        adver_focus_proportion = 0.6  # control the difficulty of D
         _, max_num_scale = self.ema_scale_fn(self.total_training_steps)
 
         # 2. Adversarial Generator Loss
@@ -227,6 +228,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
             t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
 
             ema, num_scales = self.ema_scale_fn(self.global_step)
+            wandb.log({"num_scales": num_scales}, step=self.global_step)
 
             # Start updating discriminator and generator
             losses = {}
@@ -289,7 +291,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
                 grad_penalty.backward()
             errD_fake.backward()
             if self.grad_clip:
-                th.nn.utils.clip_grad_norm_(self.D.parameters(),  self.grad_clip)
+                th.nn.utils.clip_grad_norm_(self.D.parameters(), self.grad_clip)
             losses["Adversarial Discriminator Loss"] = (errD_real + errD_fake).item()
             self.optimizerD.step()
 
@@ -340,8 +342,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
                 self.global_step += 1
 
             # logging
-            logger.logkvs(losses)
-            self.log_step()
+            self.log_step(losses)
 
     def save(self):
         import blobfile as bf
@@ -351,43 +352,53 @@ class ConsistencyGANTrainLoop(TrainLoop):
         def save_checkpoint(rate, params):
             state_dict = self.mp_trainerG.master_params_to_state_dict(params)
             if dist.get_rank() == 0:
-                logger.log(f"saving G {rate}...")
                 if not rate:
                     filename = f"G__{step:06d}.pt"
                 else:
                     filename = f"ema-G__{rate}_{step:06d}.pt"
                 with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
                     th.save(state_dict, f)
+                logger.log(f"Saved G state dict ({filename})")
 
         for rate, params in zip(self.ema_rate, self.ema_params):
             save_checkpoint(rate, params)
 
-        logger.log("saving optimizer state...")
         if dist.get_rank() == 0:
             with bf.BlobFile(
-                bf.join(get_blob_logdir(), f"optimizerG{step:06d}.pt"),
+                bf.join(get_blob_logdir(), f"optimizerG__{step:06d}.pt"),
                 "wb",
             ) as f:
                 th.save(self.optimizerG.state_dict(), f)
 
+            logger.log(f"Saved optimizerG state dict (optimizerG__{step:06d}.pt)")
+
         if dist.get_rank() == 0:
             if self.target_G:
-                logger.log("saving target model state")
-                filename = f"target_G{step:06d}.pt"
+                filename = f"target_G__{step:06d}.pt"
                 with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
                     th.save(self.target_G.state_dict(), f)
+                logger.log(f"Saved target G state dict ({filename})")
+
             if self.teacher_G and self.training_mode == "progdist":
-                logger.log("saving teacher model state")
-                filename = f"teacher_G{step:06d}.pt"
+                filename = f"teacher_G__{step:06d}.pt"
                 with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
                     th.save(self.teacher_G.state_dict(), f)
+
+                logger.log(f"Saved teacher G state dict ({filename})")
 
         # Save model parameters last to prevent race conditions where a restart
         # loads model at step N, but optimizerG/ema state isn't saved for step N.
         save_checkpoint(0, self.mp_trainerG.master_params)
         dist.barrier()
 
-    def log_step(self):
+    def log_step(self, losses):
+        # logger
+        logger.logkvs(losses)
         step = self.global_step
         logger.logkv("step", step)
-        logger.logkv("samples", (step + 1) * self.global_batch)
+        samples = (step + 1) * self.global_batch
+        logger.logkv("samples", samples)
+
+        # wandb
+        wandb.log(losses, step=step)
+        wandb.log({"samples": samples}, step=step)
