@@ -179,8 +179,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
     def run_loop(self):
         saved = False
         while (
-            not self.lr_anneal_steps
-            or self.step < self.lr_anneal_steps
+            self.step < self.lr_anneal_steps
             or self.global_step < self.total_training_steps
         ):
             batch, cond = next(self.data)
@@ -296,7 +295,9 @@ class ConsistencyGANTrainLoop(TrainLoop):
             losses["Adversarial Discriminator Loss"] = (errD_real + errD_fake).item()
             losses["Real-Discriminator Loss"] = errD_real.item()
             losses["Fake-Discriminator Loss"] = errD_fake.item()
-            losses["Gradient Penalty (Discriminator)"] = grad_penalty.item() if grad_penalty else 0.0
+            losses["Gradient Penalty (Discriminator)"] = (
+                grad_penalty.item() if grad_penalty else 0.0
+            )
             self.optimizerD.step()
 
             for p in self.D.parameters():
@@ -354,6 +355,7 @@ class ConsistencyGANTrainLoop(TrainLoop):
         step = self.global_step
         logger.log(f"Saving checkpoint at step {step}")
         logger.log(f"Saving path: {get_blob_logdir()}")
+
         def save_checkpoint(rate, params):
             state_dict = self.mp_trainerG.master_params_to_state_dict(params)
             if dist.get_rank() == 0:
