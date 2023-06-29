@@ -25,3 +25,6 @@ cm/
 
 # logging
 wandb/
+
+# experiments
+experiments/
