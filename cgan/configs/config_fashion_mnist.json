@@ -14,6 +14,14 @@
         "save_interval": 10000,
         "resume_checkpoint": ""
     },
+    "sample": {
+        "batch_size": 256,
+        "training_mode": "consistency_gan_training",
+        "sampler": "multistep", 
+        "ts": "0,106,200",
+        "steps": 201,
+        "model_path": "/path/to/cgan_imagenet64.pt"
+    },
     "loss": {
         "scale_mode": "progressive",
         "start_scales": 2,
